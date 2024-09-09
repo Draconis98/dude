@@ -104,11 +104,16 @@ class LoraLayer(BaseTunerLayer):
         self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora: bool = False
     ):
         # This code works for linear layers, override for other layer types
+        if isinstance(init_lora_weights, str) and init_lora_weights.startswith("dude"):
+            min_coverage = float(init_lora_weights.split("_")[1])
+            if abs(min_coverage) > 0.0:
+                weight, dtype, V, S, Uh, r = self.dude_prepare(min_coverage=abs(min_coverage))
+             
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
-
+            
         self.r[adapter_name] = r
-        self.lora_alpha[adapter_name] = lora_alpha
+        self.lora_alpha[adapter_name] = r if isinstance(init_lora_weights, str) and init_lora_weights.startswith("dude") else lora_alpha
         if lora_dropout > 0.0:
             lora_dropout_layer = nn.Dropout(p=lora_dropout)
         else:
@@ -133,6 +138,14 @@ class LoraLayer(BaseTunerLayer):
         elif init_lora_weights == "loftq":
             with gather_params_ctx(self.get_base_layer().weight):
                 self.loftq_init(adapter_name)
+        elif isinstance(init_lora_weights, str) and init_lora_weights.startswith("dude"):
+            with gather_params_ctx(self.get_base_layer().weight):
+                if min_coverage > 0.0:
+                    self.dude_init(adapter_name, weight, dtype, V, S, Uh)
+                elif min_coverage == 0.0:
+                    self.pissa_init(adapter_name, 'pissa')
+                else:
+                    self.reset_lora_parameters(adapter_name, True)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
         # call this before dora_init
@@ -216,6 +229,44 @@ class LoraLayer(BaseTunerLayer):
                 f"init_lora_weights should be 'pissa' or 'pissa_niter_[number of iters]', got {init_lora_weights} instead."
             )
 
+        lora_A = torch.diag(torch.sqrt(Sr)) @ Uhr
+        lora_B = Vr @ torch.diag(torch.sqrt(Sr))
+        self.lora_A[adapter_name].weight.data = lora_A
+        self.lora_B[adapter_name].weight.data = lora_B
+        weight = weight.data - self.scaling[adapter_name] * lora_B @ lora_A
+        weight = weight.to(dtype)
+        self.get_base_layer().weight.data = weight
+    
+    def dude_prepare(self, min_coverage=0.01):
+        weight = self.get_base_layer().weight
+        dtype = weight.dtype
+        if dtype not in [torch.float32, torch.float16, torch.bfloat16]:
+            raise TypeError(
+                "Please initialize DuDe under float32, float16, or bfloat16. "
+                "Subsequently, re-quantize the residual model to help minimize quantization errors."
+            )
+        weight = weight.to(torch.float32)
+        V, S, Uh = torch.linalg.svd(weight.data, full_matrices=False)
+        
+        # adapt the rank to the number of parameters
+        total_sum = S.sum()
+        cumulative_sum = 0
+        r = 0
+        for rank in range(1, S.size(0) + 1):
+            cumulative_sum += S[rank - 1]
+            if (cumulative_sum / total_sum) >= min_coverage:
+                r = rank
+                break
+            
+        return weight,dtype,V,S,Uh,r
+    
+    def dude_init(self, adapter_name, weight, dtype, V, S, Uh):
+        
+        Vr = V[:, : self.r[adapter_name]]
+        Sr = S[: self.r[adapter_name]]
+        Sr /= self.scaling[adapter_name]
+        Uhr = Uh[: self.r[adapter_name]]
+        
         lora_A = torch.diag(torch.sqrt(Sr)) @ Uhr
         lora_B = Vr @ torch.diag(torch.sqrt(Sr))
         self.lora_A[adapter_name].weight.data = lora_A

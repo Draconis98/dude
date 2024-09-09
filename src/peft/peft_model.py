@@ -292,7 +292,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 )
                 is_pissa = str(self.peft_config[initial_adapter_name].init_lora_weights).lower().startswith("pissa")
                 is_olora = str(self.peft_config[initial_adapter_name].init_lora_weights).lower() == "olora"
-                if is_pissa or is_olora:
+                if is_pissa or is_olora or is_dude:
                     raise ValueError(
                         "The `init_lora_weights` parameter of the initial adapter should be set to `True`. "
                         "Otherwise, `self.load_adapter` will subtract the decomposed values again based on the "

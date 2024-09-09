@@ -194,7 +194,7 @@ class LoraConfig(PeftConfig):
             "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved."
         },
     )
-    init_lora_weights: bool | Literal["gaussian", "olora", "pissa", "pissa_niter_[number of iters]", "loftq"] = field(
+    init_lora_weights: bool | Literal["gaussian", "olora", "pissa", "pissa_niter_[number of iters]", "loftq", "dude_[percentage of coverage]"] = field(
         default=True,
         metadata={
             "help": (
@@ -207,6 +207,7 @@ class LoraConfig(PeftConfig):
                 "Passing `'pissa_niter_[number of iters]'` initiates Fast-SVD-based PiSSA initialization, "
                 "where [number of iters] indicates the number of subspace iterations to perform fsvd, and must be a nonnegative integer."
                 "Pass `'loftq'` to use LoftQ initialization"
+                "Pass `'dude_[percentage of coverage]'` to use DuDe initialization, where `[percentage of coverage]` is the percentage of the model's weights that will be covered by the DuDe initialization."
             ),
         },
     )
